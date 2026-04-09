@@ -114,12 +114,12 @@ export default function FileUpload({ onResult, onError }) {
         className={`
           relative flex flex-col items-center justify-center
           rounded-2xl border-2 border-dashed transition cursor-pointer
-          px-6 py-10 text-center
+          px-6 py-10 text-center backdrop-blur-sm
           ${dragging
-            ? "border-blue-400 bg-blue-50"
+            ? "border-blue-500 bg-blue-500/10"
             : file
-              ? "border-slate-300 bg-slate-50 cursor-default"
-              : "border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/40"
+              ? "border-emerald-500/30 bg-emerald-500/5 cursor-default"
+              : "border-white/10 bg-white/5 hover:border-blue-500/30 hover:bg-white/10"
           }
         `}
       >
@@ -134,20 +134,20 @@ export default function FileUpload({ onResult, onError }) {
         {!file ? (
           <>
             {/* Upload icon */}
-            <div className="w-14 h-14 rounded-full bg-blue-50 border border-blue-100
-                            flex items-center justify-center mb-4 text-2xl">
+            <div className="w-14 h-14 rounded-full bg-blue-500/10 border border-blue-500/20
+                            flex items-center justify-center mb-4 text-2xl shadow-[0_0_20px_rgba(59,130,246,0.2)]">
               ⬆
             </div>
-            <p className="text-sm font-semibold text-slate-700">
+            <p className="text-sm font-semibold text-neutral-200">
               {dragging ? "Drop it here" : "Drag & drop a file, or click to browse"}
             </p>
-            <p className="text-xs text-slate-400 mt-1">Up to 10 MB</p>
+            <p className="text-xs text-neutral-500 mt-1">Up to 10 MB</p>
             {/* Format pills */}
             <div className="flex gap-2 mt-4 flex-wrap justify-center">
               {FORMAT_LABELS.map(({ icon, label }) => (
                 <span key={label}
-                      className="text-xs px-2.5 py-1 rounded-full bg-slate-100
-                                 text-slate-500 border border-slate-200">
+                      className="text-[10px] uppercase tracking-wider px-2.5 py-1 rounded-full bg-white/5
+                                 text-neutral-400 border border-white/5">
                   {icon} {label}
                 </span>
               ))}
@@ -159,12 +159,12 @@ export default function FileUpload({ onResult, onError }) {
             <div className="flex items-center gap-3">
               <FileTypeIcon name={file.name} />
               <div className="flex-1 min-w-0 text-left">
-                <p className="text-sm font-semibold text-slate-800 truncate">{file.name}</p>
-                <p className="text-xs text-slate-400">{formatBytes(file.size)}</p>
+                <p className="text-sm font-semibold text-neutral-100 truncate">{file.name}</p>
+                <p className="text-xs text-neutral-500">{formatBytes(file.size)}</p>
               </div>
               <button
                 onClick={(e) => { e.stopPropagation(); reset(); }}
-                className="text-slate-400 hover:text-red-500 text-lg leading-none transition"
+                className="text-neutral-500 hover:text-rose-400 text-lg leading-none transition"
                 title="Remove file"
               >
                 ×
@@ -174,23 +174,23 @@ export default function FileUpload({ onResult, onError }) {
             {/* Progress bar (shown while uploading) */}
             {status === "uploading" && (
               <div className="space-y-1">
-                <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
+                <div className="h-1.5 rounded-full bg-white/5 overflow-hidden">
                   <div
-                    className="h-full bg-blue-500 rounded-full transition-all duration-300"
+                    className="h-full bg-gradient-to-r from-blue-600 to-indigo-600 rounded-full transition-all duration-300"
                     style={{ width: `${progress}%` }}
                   />
                 </div>
-                <p className="text-xs text-slate-400 text-center">
+                <p className="text-xs text-neutral-400 text-center">
                   {progress < 100
                     ? `Uploading… ${progress}%`
-                    : "Extracting text & analyzing… (this may take 20–40 seconds)"}
+                    : "Extracting text & analyzing…"}
                 </p>
               </div>
             )}
 
             {status === "error" && (
-              <p className="text-xs text-red-500 text-center">
-                Upload failed — check the error above.
+              <p className="text-xs text-rose-500 text-center font-medium">
+                Upload failed — check the error details.
               </p>
             )}
           </div>
@@ -201,11 +201,12 @@ export default function FileUpload({ onResult, onError }) {
       {file && status !== "uploading" && status !== "done" && (
         <button
           onClick={handleUpload}
-          className="w-full py-3 rounded-xl bg-blue-600 text-white text-sm
-                     font-semibold hover:bg-blue-700 shadow-md shadow-blue-100
-                     active:scale-[0.99] transition"
+          className="group relative w-full py-3.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm
+                     font-bold hover:from-blue-500 hover:to-indigo-500 shadow-xl shadow-blue-900/20
+                     active:scale-[0.98] transition-all overflow-hidden"
         >
-          Analyze File →
+          <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-200" />
+          <span className="relative">Analyze File →</span>
         </button>
       )}
     </div>

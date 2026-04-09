@@ -49,10 +49,16 @@ export default function App() {
       setResult(data);
       setAppState("result");
     } catch (err) {
+      const detail = err?.response?.data?.detail;
+      const msg =
+        typeof detail === "string"
+          ? detail
+          : Array.isArray(detail)
+            ? detail.map((e) => e?.msg || String(e)).join(" ")
+            : err?.message;
       setError(
-        err?.response?.data?.detail ||
-        err?.message ||
-        "Something went wrong. Make sure the backend is running on port 8000."
+        msg ||
+          "Something went wrong. Make sure the backend is running on port 8000."
       );
       setAppState("error");
     }
@@ -88,7 +94,7 @@ export default function App() {
         />
       </div>
 
-      <div className="fixed inset-0 z-[1] pointer-events-none bg-gradient-to-t from-[#07070a] via-[#07070a]/82 to-[#07070a]/40" />
+      <div className="fixed inset-0 z-[1] pointer-events-none bg-gradient-to-t from-[#07070a]/90 via-[#07070a]/40 to-transparent" />
 
       <AnimatePresence>
         {appState === "loading" && (
@@ -106,65 +112,67 @@ export default function App() {
       </AnimatePresence>
 
       {/* Soft ambient orbs behind UI */}
-      <div className="fixed top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-[2] opacity-40">
-        <div className="absolute top-[-15%] left-[-10%] w-[50%] h-[50%] rounded-full bg-blue-600/10 blur-[140px]" />
-        <div className="absolute top-[20%] right-[-10%] w-[40%] h-[60%] rounded-full bg-indigo-600/10 blur-[150px]" />
+      <div className="fixed top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-[2] opacity-30">
+        <div className="absolute top-[-15%] left-[-10%] w-[50%] h-[50%] rounded-full bg-blue-600/5 blur-[140px]" />
+        <div className="absolute top-[20%] right-[-10%] w-[40%] h-[60%] rounded-full bg-indigo-600/5 blur-[150px]" />
       </div>
 
-      <div className="container mx-auto px-4 py-12 relative z-10">
-        {/* Input views */}
+      <div className="container mx-auto px-4 relative z-10 min-h-screen flex flex-col">
+        {/* Input views — anchored lower so the 3D detective stays visible above */}
         {(appState === "idle" || appState === "loading") && (
-          <div className="space-y-8 max-w-3xl mx-auto">
-            {/* Brand header */}
-            <div className="text-center">
-              <h1 className="text-5xl md:text-6xl font-black mb-3 tracking-tighter">
-                <span className="bg-gradient-to-r from-white via-neutral-200 to-neutral-400 bg-clip-text text-transparent">
-                  Truth
-                </span>
-                <span className="bg-gradient-to-r from-blue-400 to-indigo-500 bg-clip-text text-transparent">
-                  Lens
-                </span>
-              </h1>
-              <p className="text-lg text-neutral-400">
-                Autonomous Fact-Checking Intelligence System
-              </p>
+          <div className="flex flex-col flex-1 min-h-0 justify-end pb-8 md:pb-20 pt-[35vh]">
+            <div className="space-y-6 md:space-y-8 max-w-3xl mx-auto w-full">
+              {/* Brand header */}
+              <div className="text-center opacity-90 transition-opacity hover:opacity-100">
+                <h1 className="text-4xl sm:text-5xl md:text-6xl font-black mb-2 md:mb-3 tracking-tighter">
+                  <span className="bg-gradient-to-r from-white via-neutral-100 to-neutral-400 bg-clip-text text-transparent">
+                    Truth
+                  </span>
+                  <span className="bg-gradient-to-r from-blue-400 to-indigo-500 bg-clip-text text-transparent">
+                    Lens
+                  </span>
+                </h1>
+                <p className="text-base md:text-lg text-neutral-400/80 font-medium">
+                  Autonomous Fact-Checking Intelligence System
+                </p>
+              </div>
+
+              {/* Tab switcher */}
+              <div className="flex gap-2 backdrop-blur-md bg-white/5 border border-white/10 rounded-2xl p-1 shadow-2xl">
+                {TABS.map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    disabled={appState === "loading"}
+                    className={`flex-1 py-3 rounded-xl text-sm font-medium transition ${
+                      activeTab === tab.id
+                        ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg"
+                        : "text-neutral-400 hover:text-white"
+                    } disabled:opacity-50`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Tab content */}
+              {activeTab === "text" && (
+                <ArticleInput
+                  onAnalyze={handleAnalyzeText}
+                  isLoading={appState === "loading"}
+                />
+              )}
+
+              {activeTab === "file" && (
+                <FileUpload onResult={handleUploadResult} onError={handleUploadError} />
+              )}
             </div>
-
-            {/* Tab switcher */}
-            <div className="flex gap-2 bg-white/5 border border-white/10 rounded-2xl p-1">
-              {TABS.map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  disabled={appState === "loading"}
-                  className={`flex-1 py-3 rounded-xl text-sm font-medium transition ${
-                    activeTab === tab.id
-                      ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg"
-                      : "text-neutral-400 hover:text-white"
-                  } disabled:opacity-50`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Tab content */}
-            {activeTab === "text" && (
-              <ArticleInput
-                onAnalyze={handleAnalyzeText}
-                isLoading={appState === "loading"}
-              />
-            )}
-
-            {activeTab === "file" && (
-              <FileUpload onResult={handleUploadResult} onError={handleUploadError} />
-            )}
           </div>
         )}
 
         {/* Error view */}
         {appState === "error" && (
-          <div className="max-w-3xl mx-auto space-y-4">
+          <div className="max-w-3xl mx-auto space-y-4 py-10 md:py-14">
             <div className="p-5 bg-rose-500/10 border border-rose-500/20 rounded-2xl text-rose-400">
               <p className="font-semibold mb-2">Analysis failed</p>
               <p className="text-sm">{error}</p>
@@ -180,7 +188,7 @@ export default function App() {
 
         {/* Result view */}
         {appState === "result" && result && (
-          <div className="max-w-3xl mx-auto">
+          <div className="max-w-3xl mx-auto py-6 md:py-10">
             <ResultPanel result={result} />
             <button
               onClick={handleReset}

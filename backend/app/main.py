@@ -12,6 +12,7 @@ from sentence_transformers import CrossEncoder
 from dotenv import load_dotenv
 import numpy as np
 from app.services.file_handler import extract_text
+from app.services.article_fetcher import resolve_user_input
 
 # Configure logging
 logging.basicConfig(
@@ -507,10 +508,8 @@ async def verify_claim(request: VerifyRequest) -> VerifyResponse:
     Returns:
         VerifyResponse with truth score, verdict, and supporting sources
     """
-    claim = request.claim.strip()
-    
-    # Validate claim
-    if not claim:
+    raw_input = request.claim.strip()
+    if not raw_input:
         logger.warning("Empty claim received")
         return VerifyResponse(
             truth_score=50.0,
@@ -519,9 +518,27 @@ async def verify_claim(request: VerifyRequest) -> VerifyResponse:
             sources=[],
             summary="No claim provided for verification."
         )
-    
-    # Truncate to 5000 characters
-    claim = claim[:5000]
+
+    try:
+        claim, _source_url = resolve_user_input(raw_input)
+    except ValueError as e:
+        logger.warning("Input resolution failed: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(e),
+        )
+
+    if not claim.strip():
+        return VerifyResponse(
+            truth_score=50.0,
+            verdict="Uncertain",
+            supporting_sources=[],
+            sources=[],
+            summary="No usable text after processing your input.",
+        )
+
+    # Allow longer articles (URL extraction); cap for model + API safety
+    claim = claim[:20000]
     logger.info(f"Processing claim verification (length: {len(claim)})")
     
     # Deeper multi-claim verification for stronger truth scores.

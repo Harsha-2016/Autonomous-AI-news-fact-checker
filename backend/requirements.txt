@@ -13,3 +13,5 @@ tavily-python
 pymupdf
 python-docx
 python-multipart
+trafilatura
+python-multipart
