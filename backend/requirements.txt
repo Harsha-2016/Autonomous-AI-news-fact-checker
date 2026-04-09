@@ -10,3 +10,6 @@ spacy
 Pillow
 pytesseract
 tavily-python
+pymupdf
+python-docx
+python-multipart

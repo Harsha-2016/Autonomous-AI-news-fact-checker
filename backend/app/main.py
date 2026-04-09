@@ -1,14 +1,17 @@
 import os
 import json
 import logging
+import re
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List, Dict, Any
+from pydantic import BaseModel, Field
+from typing import List, Dict, Any, Tuple
 from tavily import TavilyClient
 from sentence_transformers import CrossEncoder
 from dotenv import load_dotenv
+import numpy as np
+from app.services.file_handler import extract_text
 
 # Configure logging
 logging.basicConfig(
@@ -123,6 +126,9 @@ class VerifyResponse(BaseModel):
     supporting_sources: List[str]
     sources: List[Dict[str, Any]]
     summary: str
+    claim_breakdown: List[Dict[str, Any]] = Field(default_factory=list)
+    score_components: Dict[str, float] = Field(default_factory=dict)
+    confidence: float = 0.0
 
 
 # Service Functions
@@ -172,6 +178,48 @@ def get_ground_truth(claim: str, tavily_client, domain_weights: Dict[str, float]
         return []
 
 
+def _softmax(values: np.ndarray) -> np.ndarray:
+    shifted = values - np.max(values)
+    exps = np.exp(shifted)
+    return exps / np.sum(exps)
+
+
+def _extract_claim_candidates(text: str, max_claims: int = 8) -> List[str]:
+    """
+    Extract likely factual claim candidates from input text.
+    Keeps the strongest candidates to make verification deeper and more stable.
+    """
+    raw_sentences = re.split(r"(?<=[.!?])\s+|\n+", text.strip())
+    cleaned: List[str] = []
+    seen = set()
+
+    for sentence in raw_sentences:
+        candidate = re.sub(r"\s+", " ", sentence).strip(" -\t\r\n")
+        if not candidate:
+            continue
+        if len(candidate) < 25 or len(candidate) > 450:
+            continue
+
+        lowered = candidate.lower()
+        # Heuristic factuality filters:
+        # - contains numbers/dates/entities cues
+        # - excludes obvious opinion-only style
+        factual_signals = bool(re.search(r"\d|%|\b(according to|reported|announced|confirmed|study|data|election|budget|deaths|cases)\b", lowered))
+        opinion_only = bool(re.search(r"\b(i think|maybe|perhaps|should|could|might)\b", lowered))
+        if not factual_signals or opinion_only:
+            continue
+
+        key = lowered
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(candidate)
+
+    if not cleaned and text.strip():
+        return [text.strip()[:450]]
+    return cleaned[:max_claims]
+
+
 def calculate_nli_scores(
     claim: str,
     evidence_list: List[Dict[str, Any]],
@@ -193,17 +241,35 @@ def calculate_nli_scores(
         # Create pair for NLI model
         pair = [claim, evidence_text]
         
-        # Run inference
-        scores = nli_model.predict([pair])
-        
-        # Map labels: 0=contradiction(0.0), 1=entailment(1.0), 2=neutral(0.5)
-        label = scores[0].argmax()
-        label_to_score = {0: 0.0, 1: 1.0, 2: 0.5}
-        nli_score = label_to_score.get(int(label), 0.5)
+        # Run inference and convert to calibrated probabilities.
+        logits = np.array(nli_model.predict([pair])[0], dtype=np.float64)
+        probs = _softmax(logits)
+        contradiction_prob, entailment_prob, neutral_prob = (
+            float(probs[0]),
+            float(probs[1]),
+            float(probs[2]),
+        )
+
+        # Calibrated evidence truth score in [0,1]:
+        # use entailment-vs-contradiction signal as the primary driver,
+        # while neutral reduces confidence rather than boosting truth.
+        nli_score = 0.5 + 0.5 * (entailment_prob - contradiction_prob)
+        nli_score = max(0.0, min(1.0, nli_score))
+        nli_confidence = max(entailment_prob, contradiction_prob, neutral_prob)
+        stance = (
+            "supported" if entailment_prob >= contradiction_prob and entailment_prob >= neutral_prob
+            else "refuted" if contradiction_prob >= entailment_prob and contradiction_prob >= neutral_prob
+            else "insufficient"
+        )
         
         results.append({
             **evidence,
-            "nli_score": nli_score
+            "nli_score": nli_score,
+            "entailment_prob": entailment_prob,
+            "contradiction_prob": contradiction_prob,
+            "neutral_prob": neutral_prob,
+            "nli_confidence": nli_confidence,
+            "stance": stance,
         })
     
     return results
@@ -242,6 +308,172 @@ def calculate_truth_score(evidence_with_scores: List[Dict[str, Any]]) -> float:
     
     logger.info(f"Calculated truth score: {truth_score}")
     return truth_score
+
+
+def score_single_claim(
+    claim: str,
+    evidence_with_scores: List[Dict[str, Any]],
+) -> Tuple[float, float, str, Dict[str, int]]:
+    """
+    Returns:
+      claim_score_0_100, claim_confidence_0_1, claim_verdict, stance_counts
+    """
+    if not evidence_with_scores:
+        return 50.0, 0.25, "Insufficient", {"supported": 0, "refuted": 0, "insufficient": 0}
+
+    total_weight = 0.0
+    weighted_score = 0.0
+    confidence_acc = 0.0
+    stance_counts = {"supported": 0, "refuted": 0, "insufficient": 0}
+
+    for ev in evidence_with_scores:
+        trust = float(ev.get("trust_score", 0.5))
+        nli_score = float(ev.get("nli_score", 0.5))
+        nli_conf = float(ev.get("nli_confidence", 0.5))
+        stance = ev.get("stance", "insufficient")
+        stance_counts[stance] = stance_counts.get(stance, 0) + 1
+
+        # Blend model stance with source reliability.
+        # More reliable sources and more confident predictions matter more.
+        evidence_weight = max(0.05, (0.60 * trust) + (0.40 * nli_conf))
+        evidence_score = (0.88 * nli_score) + (0.12 * trust)
+
+        weighted_score += evidence_score * evidence_weight
+        confidence_acc += nli_conf * evidence_weight
+        total_weight += evidence_weight
+
+    if total_weight <= 0:
+        return 50.0, 0.25, "Insufficient", stance_counts
+
+    base_score = weighted_score / total_weight
+    confidence = confidence_acc / total_weight
+
+    # Contradiction-heavy evidence should strongly reduce score,
+    # while support-heavy evidence should raise it.
+    contradiction_ratio = stance_counts["refuted"] / max(1, len(evidence_with_scores))
+    support_ratio = stance_counts["supported"] / max(1, len(evidence_with_scores))
+    consistency_adjustment = (support_ratio * 0.20) - (contradiction_ratio * 0.28)
+
+    final_score_01 = max(0.0, min(1.0, base_score + consistency_adjustment))
+    claim_score = round(final_score_01 * 100, 2)
+    verdict = classify_verdict(claim_score)
+    return claim_score, round(confidence, 4), verdict, stance_counts
+
+
+def deep_verify_claim(
+    text: str,
+    tavily_client,
+    domain_weights: Dict[str, float],
+    nli_model,
+) -> Dict[str, Any]:
+    """
+    Decomposes input into factual claims, verifies each independently,
+    then aggregates to a robust truth score.
+    """
+    claims = _extract_claim_candidates(text)
+    if not claims:
+        return {
+            "truth_score": 50.0,
+            "verdict": "Uncertain",
+            "summary": "No checkable factual claims detected.",
+            "sources": [],
+            "supporting_sources": [],
+            "claim_breakdown": [],
+            "score_components": {"evidence_quality": 50.0, "coverage": 0.0, "consistency": 50.0},
+            "confidence": 0.0,
+        }
+
+    all_sources: List[Dict[str, Any]] = []
+    source_urls = set()
+    claim_breakdown: List[Dict[str, Any]] = []
+    claim_scores: List[float] = []
+    claim_confidences: List[float] = []
+    supported = refuted = insufficient = 0
+
+    for claim in claims:
+        evidence = get_ground_truth(claim, tavily_client, domain_weights)
+        evidence_scored = calculate_nli_scores(claim, evidence, nli_model)
+        score, confidence, verdict, stance_counts = score_single_claim(claim, evidence_scored)
+
+        if verdict == "True":
+            supported += 1
+        elif verdict == "False":
+            refuted += 1
+        else:
+            insufficient += 1
+
+        claim_scores.append(score)
+        claim_confidences.append(confidence)
+
+        claim_breakdown.append({
+            "claim": claim,
+            "truth_score": score,
+            "confidence": confidence,
+            "verdict": verdict,
+            "evidence_count": len(evidence_scored),
+            "stance_counts": stance_counts,
+        })
+
+        for ev in evidence_scored:
+            url = ev.get("url", "")
+            if url and url in source_urls:
+                continue
+            if url:
+                source_urls.add(url)
+            all_sources.append(ev)
+
+    # Aggregate components
+    if claim_scores:
+        evidence_quality = float(np.mean(claim_scores))
+        confidence_component = float(np.mean(claim_confidences)) * 100.0
+    else:
+        evidence_quality = 50.0
+        confidence_component = 0.0
+
+    covered_claims = sum(1 for c in claim_breakdown if c["evidence_count"] > 0)
+    coverage = (covered_claims / max(1, len(claim_breakdown))) * 100.0
+    consistency = (supported / max(1, len(claim_breakdown))) * 100.0 - (refuted / max(1, len(claim_breakdown))) * 45.0 + 50.0
+    consistency = max(1.0, min(100.0, consistency))
+    contradiction_ratio = refuted / max(1, len(claim_breakdown))
+    support_ratio = supported / max(1, len(claim_breakdown))
+
+    # Final score prioritizes evidence quality + confidence, then coverage/consistency.
+    final_score = (
+        0.52 * evidence_quality +
+        0.22 * confidence_component +
+        0.13 * coverage +
+        0.13 * consistency
+    )
+    # Global calibration: widen separation for obviously true/false sets.
+    final_score += support_ratio * 8.0
+    final_score -= contradiction_ratio * 18.0
+    if coverage < 40.0:
+        # Low coverage often means weak verification; pull toward skeptical side.
+        final_score -= 6.0
+    final_score = round(max(1.0, min(100.0, final_score)), 2)
+    verdict = classify_verdict(final_score)
+
+    summary = (
+        f"Deep analysis checked {len(claim_breakdown)} claim(s): "
+        f"{supported} supported, {refuted} refuted, {insufficient} uncertain. "
+        f"Evidence coverage {coverage:.0f}% with confidence {confidence_component:.0f}%."
+    )
+
+    return {
+        "truth_score": final_score,
+        "verdict": verdict,
+        "summary": summary,
+        "sources": all_sources[:10],
+        "supporting_sources": list(source_urls)[:10],
+        "claim_breakdown": claim_breakdown,
+        "score_components": {
+            "evidence_quality": round(evidence_quality, 2),
+            "coverage": round(coverage, 2),
+            "consistency": round(consistency, 2),
+            "confidence": round(confidence_component, 2),
+        },
+        "confidence": round(confidence_component / 100.0, 4),
+    }
 
 
 def classify_verdict(truth_score: float) -> str:
@@ -292,40 +524,30 @@ async def verify_claim(request: VerifyRequest) -> VerifyResponse:
     claim = claim[:5000]
     logger.info(f"Processing claim verification (length: {len(claim)})")
     
-    # Retrieve evidence
-    evidence = get_ground_truth(
+    # Deeper multi-claim verification for stronger truth scores.
+    deep_result = deep_verify_claim(
         claim,
         app.state.tavily_client,
-        app.state.domain_weights
+        app.state.domain_weights,
+        app.state.ml_models.get("nli_model"),
     )
     
-    # Calculate NLI scores
-    evidence_with_scores = calculate_nli_scores(
-        claim,
-        evidence,
-        app.state.ml_models.get("nli_model")
+    logger.info(
+        "Verification complete: verdict=%s, score=%s, claims=%d",
+        deep_result["verdict"],
+        deep_result["truth_score"],
+        len(deep_result["claim_breakdown"]),
     )
-    
-    # Calculate truth score
-    truth_score = calculate_truth_score(evidence_with_scores)
-    
-    # Classify verdict
-    verdict = classify_verdict(truth_score)
-    
-    # Extract supporting sources
-    supporting_sources = [ev.get("url", "") for ev in evidence_with_scores]
-    
-    # Generate summary
-    summary = generate_summary(verdict, truth_score, len(evidence_with_scores))
-    
-    logger.info(f"Verification complete: verdict={verdict}, score={truth_score}")
     
     return VerifyResponse(
-        truth_score=truth_score,
-        verdict=verdict,
-        supporting_sources=supporting_sources,
-        sources=evidence_with_scores,
-        summary=summary
+        truth_score=deep_result["truth_score"],
+        verdict=deep_result["verdict"],
+        supporting_sources=deep_result["supporting_sources"],
+        sources=deep_result["sources"],
+        summary=deep_result["summary"],
+        claim_breakdown=deep_result["claim_breakdown"],
+        score_components=deep_result["score_components"],
+        confidence=deep_result["confidence"],
     )
 
 
@@ -344,3 +566,50 @@ async def analyze_legacy(request: Dict[str, Any]) -> VerifyResponse:
     claim = request.get("text", "")
     verify_request = VerifyRequest(claim=claim)
     return await verify_claim(verify_request)
+
+
+@app.post("/upload", response_model=VerifyResponse)
+async def upload_and_analyze(file: UploadFile = File(...)) -> VerifyResponse:
+    """
+    Upload endpoint used by frontend FileUpload component.
+    Extracts text from file/image and runs the same deep verify pipeline.
+    """
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Uploaded file is empty.",
+        )
+
+    filename = file.filename or "upload.bin"
+    if len(raw) > 10 * 1024 * 1024:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="File exceeds 10 MB limit.",
+        )
+
+    try:
+        extracted_text = extract_text(raw, filename)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=str(exc),
+        )
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Text extraction failed: {exc}",
+        )
+
+    if not extracted_text.strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="No extractable text found in file.",
+        )
+
+    return await verify_claim(VerifyRequest(claim=extracted_text))
