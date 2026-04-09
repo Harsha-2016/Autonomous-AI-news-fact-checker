@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+pydantic
+python-dotenv
+requests
+transformers
+torch
+sentence-transformers
+spacy
+Pillow
+pytesseract
+tavily-python
