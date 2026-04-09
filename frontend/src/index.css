@@ -7,3 +7,59 @@
     @apply bg-neutral-900 text-neutral-50 antialiased;
   }
 }
+
+/* Scanner overlay (from Truth Seeker UI) */
+@keyframes scan-sweep {
+  0% {
+    top: -4px;
+  }
+  100% {
+    top: 100%;
+  }
+}
+
+.page-scanner-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.page-scanner-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgb(56 189 248),
+    rgb(45 212 191),
+    rgb(56 189 248),
+    transparent
+  );
+  box-shadow:
+    0 0 30px 10px rgb(56 189 248 / 0.45),
+    0 0 80px 20px rgb(56 189 248 / 0.2);
+  animation: scan-sweep 2s ease-in-out infinite;
+}
+
+.page-scanner-grid {
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(rgb(56 189 248 / 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(56 189 248 / 0.04) 1px, transparent 1px);
+  background-size: 40px 40px;
+  animation: grid-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes grid-pulse {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 0.75;
+  }
+}
