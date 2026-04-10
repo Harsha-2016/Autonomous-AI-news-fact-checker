@@ -130,6 +130,7 @@ class VerifyResponse(BaseModel):
     claim_breakdown: List[Dict[str, Any]] = Field(default_factory=list)
     score_components: Dict[str, float] = Field(default_factory=dict)
     confidence: float = 0.0
+    original_language: str = "en"
 
 
 class SimplifyRequest(BaseModel):
@@ -546,6 +547,28 @@ async def verify_claim(request: VerifyRequest) -> VerifyResponse:
             summary="No usable text after processing your input.",
         )
 
+    # Language detection and translation
+    try:
+        from langdetect import detect
+        lang = detect(claim)
+    except:
+        lang = "en"
+
+    if lang == "te":
+        logger.info("Detected Telugu language. Loading translation model...")
+        if "te_en_translator" not in app.state.ml_models:
+            from transformers import pipeline
+            app.state.ml_models["te_en_translator"] = pipeline("translation", model="Helsinki-NLP/opus-mt-dra-en")
+        
+        try:
+            translator = app.state.ml_models["te_en_translator"]
+            chunk = claim[:1000] # Safe token limit for Helsinki-NLP
+            translated = translator(chunk)[0]["translation_text"]
+            logger.info("Translated Telugu text to English successfully.")
+            claim = translated
+        except Exception as e:
+            logger.error(f"Translation failed: {e}")
+
     # Allow longer articles (URL extraction); cap for model + API safety
     claim = claim[:20000]
     logger.info(f"Processing claim verification (length: {len(claim)})")
@@ -574,6 +597,7 @@ async def verify_claim(request: VerifyRequest) -> VerifyResponse:
         claim_breakdown=deep_result["claim_breakdown"],
         score_components=deep_result["score_components"],
         confidence=deep_result["confidence"],
+        original_language=lang,
     )
 
 
