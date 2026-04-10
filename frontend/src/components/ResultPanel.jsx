@@ -214,6 +214,27 @@ truthlens.app`;
               <p className="text-gray-500 text-sm max-w-md">Our intelligence systems could not securely locate reliable references regarding this claim anywhere online.</p>
             </div>
           )}
+
+          {/* Extension Promotion Banner */}
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 1 }}
+            className="mt-8 p-6 rounded-3xl bg-gradient-to-r from-blue-600/10 to-indigo-600/10 border border-indigo-500/20 shadow-inner flex flex-col sm:flex-row items-center justify-between gap-4 backdrop-blur-sm"
+          >
+            <div>
+              <h4 className="text-white font-semibold mb-1 text-lg">Liked TruthLens So far?</h4>
+              <p className="text-indigo-200/70 text-sm">You can also add an extension to your own browser for instant fact-checking anywhere on the web.</p>
+            </div>
+            <a 
+              href="https://github.com/Harsha-2016/Autonomous-AI-news-fact-checker/tree/main/extension" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="whitespace-nowrap px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold shadow-lg shadow-indigo-900/20 transition-all active:scale-[0.98]"
+            >
+              Get Extension 🚀
+            </a>
+          </motion.div>
         </div>
       </motion.div>
     </>
