@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Truth<span class="highlight">Lens</span></h1>
+      <p>Scan Current Article</p>
+    </div>
+    
+    <div id="content" class="content">
+      <button id="scan-btn" class="btn shrink-on-click">Analyze Page</button>
+      
+      <div id="loading" class="hidden loading-indicator">
+        <div class="spinner"></div>
+        <p>Scanning Context & Intelligence...</p>
+      </div>
+      
+      <div id="error" class="hidden error-box"></div>
+      
+      <div id="result-view" class="hidden result-box">
+        <div class="score-container">
+          <svg viewBox="0 0 100 50" class="gauge">
+            <path class="gauge-bg" d="M 10 50 A 40 40 0 0 1 90 50" />
+            <path id="gauge-fill" class="gauge-fill" d="M 10 50 A 40 40 0 0 1 90 50" />
+          </svg>
+          <div class="score-text">
+            <span id="score-val">--</span><span class="score-small">%</span>
+          </div>
+        </div>
+        <div id="verdict-val" class="verdict"></div>
+        <p id="summary" class="summary-text"></p>
+        
+        <div class="components">
+          <p>Confidence: <span id="conf-val" class="white-text"></span>%</p>
+          <p>Coverage: <span id="cov-val" class="white-text"></span>%</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

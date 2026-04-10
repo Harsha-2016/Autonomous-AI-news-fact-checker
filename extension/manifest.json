@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "TruthLens Fact-Checker",
+  "version": "1.0",
+  "description": "Autonomous AI Fact-Checking. Scan current articles with TruthLens.",
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "Scan with TruthLens"
+  },
+  "permissions": [
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:8000/*",
+    "http://localhost:8000/*",
+    "<all_urls>"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"]
+    }
+  ]
+}
