@@ -2,16 +2,38 @@ import React, { useRef, useState } from 'react';
 import TruthGauge from './TruthGauge';
 import SourceBadge from './SourceBadge';
 import ShareCard from './ShareCard';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import html2canvas from 'html2canvas';
-import { Copy, Image as ImageIcon, Check, Loader2 } from 'lucide-react';
+import { Check, Loader2 } from 'lucide-react';
+import { simplifyVerdict } from '../api/client';
 
 const ResultPanel = ({ result }) => {
   const shareCardRef = useRef(null);
   const [copied, setCopied] = useState(false);
   const [sharing, setSharing] = useState(false);
+  
+  // ELI5 State
+  const [mode, setMode] = useState('technical');
+  const [eli5Text, setEli5Text] = useState(null);
+  const [isSimplifying, setIsSimplifying] = useState(false);
 
   if (!result) return null;
+
+  const handleEli5 = async () => {
+    setMode('eli5');
+    if (!eli5Text) {
+      setIsSimplifying(true);
+      try {
+        const response = await simplifyVerdict(result.summary, result.truth_score);
+        setEli5Text(response.simple_explanation);
+      } catch (err) {
+        console.error("Simple explanation failed", err);
+        setEli5Text("Failed to simplify. Please try again later.");
+      } finally {
+        setIsSimplifying(false);
+      }
+    }
+  };
 
   const handleExport = async () => {
     if (!shareCardRef.current || sharing) return;
@@ -83,13 +105,57 @@ truthlens.app`;
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.6 }}
               className="p-6 rounded-3xl bg-white/5 border border-white/10 backdrop-blur-md shadow-xl"
             >
+               <div className="flex bg-black/40 border border-white/5 rounded-xl p-1 mb-4 shadow-inner">
+                 <button 
+                   onClick={() => setMode('technical')}
+                   className={`flex-1 py-1.5 text-xs font-bold tracking-wide rounded-lg transition-all duration-300 ${mode === 'technical' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-400 hover:text-white'}`}
+                 >
+                   TECHNICAL
+                 </button>
+                 <button 
+                   onClick={handleEli5}
+                   className={`flex-1 py-1.5 text-xs font-bold tracking-wide rounded-lg transition-all duration-300 ${mode === 'eli5' ? 'bg-purple-600 text-white shadow-md' : 'text-gray-400 hover:text-white'}`}
+                 >
+                   ELI5
+                 </button>
+               </div>
+
                <h3 className="text-gray-400 text-xs uppercase tracking-widest font-semibold mb-3 flex items-center gap-2">
-                   <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-                   Analysis Summary
+                   <div className={`w-2 h-2 rounded-full animate-pulse ${mode === 'technical' ? 'bg-blue-500' : 'bg-purple-500'}`} />
+                   {mode === 'technical' ? 'Analysis Summary' : 'Simple Explanation'}
                </h3>
-               <p className="text-gray-200 leading-relaxed text-sm font-medium mb-6">
-                 {result.summary}
-               </p>
+               
+               <div className="mb-6 min-h-[80px]">
+                 <AnimatePresence mode="wait">
+                   {mode === 'technical' ? (
+                     <motion.p 
+                       key="tech"
+                       initial={{ opacity: 0, y: 5 }}
+                       animate={{ opacity: 1, y: 0 }}
+                       exit={{ opacity: 0, y: -5 }}
+                       className="text-gray-200 leading-relaxed text-sm font-medium"
+                     >
+                       {result.summary}
+                     </motion.p>
+                   ) : (
+                     <motion.p 
+                       key="eli5"
+                       initial={{ opacity: 0, y: 5 }}
+                       animate={{ opacity: 1, y: 0 }}
+                       exit={{ opacity: 0, y: -5 }}
+                       className="text-purple-100 leading-relaxed text-sm font-medium"
+                     >
+                       {isSimplifying ? (
+                         <span className="flex items-center gap-2 text-purple-300">
+                           <Loader2 className="w-4 h-4 animate-spin" /> Simplifying...
+                         </span>
+                       ) : (
+                         eli5Text
+                       )}
+                     </motion.p>
+                   )}
+                 </AnimatePresence>
+               </div>
 
                {/* Share Button (Combined) */}
                <div className="flex flex-col gap-3 pt-6 border-t border-white/10">

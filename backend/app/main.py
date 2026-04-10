@@ -132,6 +132,15 @@ class VerifyResponse(BaseModel):
     confidence: float = 0.0
 
 
+class SimplifyRequest(BaseModel):
+    technical_verdict: str
+    truth_score: float
+
+
+class SimplifyResponse(BaseModel):
+    simple_explanation: str
+
+
 # Service Functions
 def get_ground_truth(claim: str, tavily_client, domain_weights: Dict[str, float]) -> List[Dict[str, Any]]:
     """Retrieve evidence from trusted sources using Tavily API."""
@@ -630,3 +639,39 @@ async def upload_and_analyze(file: UploadFile = File(...)) -> VerifyResponse:
         )
 
     return await verify_claim(VerifyRequest(claim=extracted_text))
+
+
+@app.post("/simplify", response_model=SimplifyResponse)
+async def simplify_verdict(request: SimplifyRequest) -> SimplifyResponse:
+    score = request.truth_score
+    
+    # Template fallback definitions
+    if score >= 80:
+        fallback_exp = "This article is mostly true. Most claims match reliable sources."
+    elif score >= 60:
+        fallback_exp = "This article has both true and false information. Be careful."
+    elif score >= 40:
+        fallback_exp = "This article has more false than true information."
+    else:
+        fallback_exp = "This article is mostly false. Don't trust it."
+
+    import requests
+    hf_key = os.getenv("HF_API_KEY")
+    if hf_key and hf_key.strip() and hf_key != "your_huggingface_token":
+        try:
+            prompt = f"Explain this fact-check result in 2-3 simple sentences a 12-year-old would understand. Use plain words, no jargon.\n\nTechnical verdict: {request.technical_verdict}\nTruth score: {request.truth_score}/100\n\nSimple explanation:\n"
+            ans = requests.post(
+                "https://api-inference.huggingface.co/models/HuggingFaceH4/zephyr-7b-beta",
+                headers={"Authorization": f"Bearer {hf_key}"},
+                json={"inputs": prompt, "parameters": {"max_new_tokens": 100, "return_full_text": False}},
+                timeout=5
+            )
+            ans.raise_for_status()
+            text = ans.json()[0]["generated_text"].strip()
+            if text:
+                return SimplifyResponse(simple_explanation=text)
+        except Exception as e:
+            logger.error(f"LLM simplification failed: {e}")
+            pass
+            
+    return SimplifyResponse(simple_explanation=fallback_exp)
